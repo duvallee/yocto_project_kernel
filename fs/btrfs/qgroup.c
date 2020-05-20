@@ -2055,12 +2055,8 @@ int btrfs_qgroup_account_extent(struct btrfs_trans_handle *trans, u64 bytenr,
 	u64 nr_old_roots = 0;
 	int ret = 0;
 
-	/*
-	 * If quotas get disabled meanwhile, the resouces need to be freed and
-	 * we can't just exit here.
-	 */
 	if (!test_bit(BTRFS_FS_QUOTA_ENABLED, &fs_info->flags))
-		goto out_free;
+		return 0;
 
 	if (new_roots) {
 		if (!maybe_fs_roots(new_roots))

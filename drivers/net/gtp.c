@@ -772,12 +772,12 @@ static int gtp_hashtable_new(struct gtp_dev *gtp, int hsize)
 	int i;
 
 	gtp->addr_hash = kmalloc_array(hsize, sizeof(struct hlist_head),
-				       GFP_KERNEL | __GFP_NOWARN);
+				       GFP_KERNEL);
 	if (gtp->addr_hash == NULL)
 		return -ENOMEM;
 
 	gtp->tid_hash = kmalloc_array(hsize, sizeof(struct hlist_head),
-				      GFP_KERNEL | __GFP_NOWARN);
+				      GFP_KERNEL);
 	if (gtp->tid_hash == NULL)
 		goto err1;
 
@@ -809,21 +809,19 @@ static struct sock *gtp_encap_enable_socket(int fd, int type,
 		return NULL;
 	}
 
-	sk = sock->sk;
-	if (sk->sk_protocol != IPPROTO_UDP ||
-	    sk->sk_type != SOCK_DGRAM ||
-	    (sk->sk_family != AF_INET && sk->sk_family != AF_INET6)) {
+	if (sock->sk->sk_protocol != IPPROTO_UDP) {
 		pr_debug("socket fd=%d not UDP\n", fd);
 		sk = ERR_PTR(-EINVAL);
 		goto out_sock;
 	}
 
-	lock_sock(sk);
-	if (sk->sk_user_data) {
+	lock_sock(sock->sk);
+	if (sock->sk->sk_user_data) {
 		sk = ERR_PTR(-EBUSY);
 		goto out_rel_sock;
 	}
 
+	sk = sock->sk;
 	sock_hold(sk);
 
 	tuncfg.sk_user_data = gtp;

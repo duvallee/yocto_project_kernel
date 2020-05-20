@@ -1935,7 +1935,6 @@ static uint brcmf_sdio_readframes(struct brcmf_sdio *bus, uint maxframes)
 					       BRCMF_SDIO_FT_NORMAL)) {
 				rd->len = 0;
 				brcmu_pkt_buf_free_skb(pkt);
-				continue;
 			}
 			bus->sdcnt.rx_readahead_cnt++;
 			if (rd->len != roundup(rd_new.len, 16)) {
@@ -3133,12 +3132,9 @@ static int brcmf_debugfs_sdio_count_read(struct seq_file *seq, void *data)
 	return 0;
 }
 
-static void brcmf_sdio_debugfs_create(struct device *dev)
+static void brcmf_sdio_debugfs_create(struct brcmf_sdio *bus)
 {
-	struct brcmf_bus *bus_if = dev_get_drvdata(dev);
-	struct brcmf_pub *drvr = bus_if->drvr;
-	struct brcmf_sdio_dev *sdiodev = bus_if->bus_priv.sdio;
-	struct brcmf_sdio *bus = sdiodev->bus;
+	struct brcmf_pub *drvr = bus->sdiodev->bus_if->drvr;
 	struct dentry *dentry = brcmf_debugfs_get_devdir(drvr);
 
 	if (IS_ERR_OR_NULL(dentry))
@@ -3158,7 +3154,7 @@ static int brcmf_sdio_checkdied(struct brcmf_sdio *bus)
 	return 0;
 }
 
-static void brcmf_sdio_debugfs_create(struct device *dev)
+static void brcmf_sdio_debugfs_create(struct brcmf_sdio *bus)
 {
 }
 #endif /* DEBUG */
@@ -3442,6 +3438,8 @@ static int brcmf_sdio_bus_preinit(struct device *dev)
 	bus->rxbuf = kmalloc(value, GFP_ATOMIC);
 	if (bus->rxbuf)
 		bus->rxblen = value;
+
+	brcmf_sdio_debugfs_create(bus);
 
 	/* the commands below use the terms tx and rx from
 	 * a device perspective, ie. bus:txglom affects the
@@ -4053,7 +4051,6 @@ static const struct brcmf_bus_ops brcmf_sdio_bus_ops = {
 	.get_ramsize = brcmf_sdio_bus_get_ramsize,
 	.get_memdump = brcmf_sdio_bus_get_memdump,
 	.get_fwname = brcmf_sdio_get_fwname,
-	.debugfs_create = brcmf_sdio_debugfs_create
 };
 
 #define BRCMF_SDIO_FW_CODE	0

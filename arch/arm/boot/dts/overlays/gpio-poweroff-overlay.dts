@@ -32,6 +32,5 @@
 		active_low =    <&power_ctrl>,"gpios:8";
 		input =         <&power_ctrl>,"input?";
 		export =        <&power_ctrl>,"export?";
-		timeout_ms =    <&power_ctrl>,"timeout-ms:0";
 	};
 };

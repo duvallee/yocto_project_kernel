@@ -1464,7 +1464,7 @@ static bool hns3_get_tx_timeo_queue_info(struct net_device *ndev)
 	int i;
 
 	/* Find the stopped queue the same way the stack does */
-	for (i = 0; i < ndev->num_tx_queues; i++) {
+	for (i = 0; i < ndev->real_num_tx_queues; i++) {
 		struct netdev_queue *q;
 		unsigned long trans_start;
 
@@ -2605,10 +2605,9 @@ err_free_chain:
 	cur_chain = head->next;
 	while (cur_chain) {
 		chain = cur_chain->next;
-		devm_kfree(&pdev->dev, cur_chain);
+		devm_kfree(&pdev->dev, chain);
 		cur_chain = chain;
 	}
-	head->next = NULL;
 
 	return -ENOMEM;
 }
@@ -2643,7 +2642,7 @@ static int hns3_nic_init_vector_data(struct hns3_nic_priv *priv)
 	struct hnae3_handle *h = priv->ae_handle;
 	struct hns3_enet_tqp_vector *tqp_vector;
 	int ret = 0;
-	int i;
+	u16 i;
 
 	for (i = 0; i < priv->vector_num; i++) {
 		tqp_vector = &priv->tqp_vector[i];
@@ -2680,7 +2679,7 @@ static int hns3_nic_init_vector_data(struct hns3_nic_priv *priv)
 		ret = hns3_get_vector_ring_chain(tqp_vector,
 						 &vector_ring_chain);
 		if (ret)
-			goto map_ring_fail;
+			return ret;
 
 		ret = h->ae_algo->ops->map_ring_to_vector(h,
 			tqp_vector->vector_irq, &vector_ring_chain);
@@ -2688,19 +2687,13 @@ static int hns3_nic_init_vector_data(struct hns3_nic_priv *priv)
 		hns3_free_vector_ring_chain(tqp_vector, &vector_ring_chain);
 
 		if (ret)
-			goto map_ring_fail;
+			return ret;
 
 		netif_napi_add(priv->netdev, &tqp_vector->napi,
 			       hns3_nic_common_poll, NAPI_POLL_WEIGHT);
 	}
 
 	return 0;
-
-map_ring_fail:
-	while (i--)
-		netif_napi_del(&priv->tqp_vector[i].napi);
-
-	return ret;
 }
 
 static int hns3_nic_alloc_vector_data(struct hns3_nic_priv *priv)

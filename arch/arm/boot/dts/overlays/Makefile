@@ -51,7 +51,6 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	gpio-poweroff.dtbo \
 	gpio-shutdown.dtbo \
 	hd44780-lcd.dtbo \
-	hdmi-backlight-hwhack-gpio.dtbo \
 	hifiberry-amp.dtbo \
 	hifiberry-dac.dtbo \
 	hifiberry-dacplus.dtbo \
@@ -103,7 +102,6 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	mcp3202.dtbo \
 	mcp342x.dtbo \
 	media-center.dtbo \
-	merus-amp.dtbo \
 	midi-uart0.dtbo \
 	midi-uart1.dtbo \
 	miniuart-bt.dtbo \
@@ -147,7 +145,6 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	sdhost.dtbo \
 	sdio.dtbo \
 	sdtweak.dtbo \
-	sh1106-spi.dtbo \
 	smi.dtbo \
 	smi-dev.dtbo \
 	smi-nand.dtbo \
@@ -171,8 +168,6 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	spi6-1cs.dtbo \
 	spi6-2cs.dtbo \
 	ssd1306.dtbo \
-	ssd1306-spi.dtbo \
-	ssd1351-spi.dtbo \
 	superaudioboard.dtbo \
 	sx150x.dtbo \
 	tc358743.dtbo \

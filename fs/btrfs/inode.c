@@ -4120,29 +4120,17 @@ out:
 }
 
 static int btrfs_unlink_subvol(struct btrfs_trans_handle *trans,
-			       struct inode *dir, struct dentry *dentry)
+			       struct inode *dir, u64 objectid,
+			       const char *name, int name_len)
 {
 	struct btrfs_root *root = BTRFS_I(dir)->root;
-	struct btrfs_inode *inode = BTRFS_I(d_inode(dentry));
 	struct btrfs_path *path;
 	struct extent_buffer *leaf;
 	struct btrfs_dir_item *di;
 	struct btrfs_key key;
-	const char *name = dentry->d_name.name;
-	int name_len = dentry->d_name.len;
 	u64 index;
 	int ret;
-	u64 objectid;
 	u64 dir_ino = btrfs_ino(BTRFS_I(dir));
-
-	if (btrfs_ino(inode) == BTRFS_FIRST_FREE_OBJECTID) {
-		objectid = inode->root->root_key.objectid;
-	} else if (btrfs_ino(inode) == BTRFS_EMPTY_SUBVOL_DIR_OBJECTID) {
-		objectid = inode->location.objectid;
-	} else {
-		WARN_ON(1);
-		return -EINVAL;
-	}
 
 	path = btrfs_alloc_path();
 	if (!path)
@@ -4168,16 +4156,13 @@ static int btrfs_unlink_subvol(struct btrfs_trans_handle *trans,
 	}
 	btrfs_release_path(path);
 
-	/*
-	 * This is a placeholder inode for a subvolume we didn't have a
-	 * reference to at the time of the snapshot creation.  In the meantime
-	 * we could have renamed the real subvol link into our snapshot, so
-	 * depending on btrfs_del_root_ref to return -ENOENT here is incorret.
-	 * Instead simply lookup the dir_index_item for this entry so we can
-	 * remove it.  Otherwise we know we have a ref to the root and we can
-	 * call btrfs_del_root_ref, and it _shouldn't_ fail.
-	 */
-	if (btrfs_ino(inode) == BTRFS_EMPTY_SUBVOL_DIR_OBJECTID) {
+	ret = btrfs_del_root_ref(trans, objectid, root->root_key.objectid,
+				 dir_ino, &index, name, name_len);
+	if (ret < 0) {
+		if (ret != -ENOENT) {
+			btrfs_abort_transaction(trans, ret);
+			goto out;
+		}
 		di = btrfs_search_dir_index_item(root, path, dir_ino,
 						 name, name_len);
 		if (IS_ERR_OR_NULL(di)) {
@@ -4192,16 +4177,8 @@ static int btrfs_unlink_subvol(struct btrfs_trans_handle *trans,
 		leaf = path->nodes[0];
 		btrfs_item_key_to_cpu(leaf, &key, path->slots[0]);
 		index = key.offset;
-		btrfs_release_path(path);
-	} else {
-		ret = btrfs_del_root_ref(trans, objectid,
-					 root->root_key.objectid, dir_ino,
-					 &index, name, name_len);
-		if (ret) {
-			btrfs_abort_transaction(trans, ret);
-			goto out;
-		}
 	}
+	btrfs_release_path(path);
 
 	ret = btrfs_delete_delayed_dir_index(trans, BTRFS_I(dir), index);
 	if (ret) {
@@ -4396,7 +4373,8 @@ int btrfs_delete_subvolume(struct inode *dir, struct dentry *dentry)
 
 	btrfs_record_snapshot_destroy(trans, BTRFS_I(dir));
 
-	ret = btrfs_unlink_subvol(trans, dir, dentry);
+	ret = btrfs_unlink_subvol(trans, dir, dest->root_key.objectid,
+				  dentry->d_name.name, dentry->d_name.len);
 	if (ret) {
 		err = ret;
 		btrfs_abort_transaction(trans, ret);
@@ -4491,7 +4469,10 @@ static int btrfs_rmdir(struct inode *dir, struct dentry *dentry)
 		return PTR_ERR(trans);
 
 	if (unlikely(btrfs_ino(BTRFS_I(inode)) == BTRFS_EMPTY_SUBVOL_DIR_OBJECTID)) {
-		err = btrfs_unlink_subvol(trans, dir, dentry);
+		err = btrfs_unlink_subvol(trans, dir,
+					  BTRFS_I(inode)->location.objectid,
+					  dentry->d_name.name,
+					  dentry->d_name.len);
 		goto out;
 	}
 
@@ -9490,6 +9471,7 @@ static int btrfs_rename_exchange(struct inode *old_dir,
 	u64 new_ino = btrfs_ino(BTRFS_I(new_inode));
 	u64 old_idx = 0;
 	u64 new_idx = 0;
+	u64 root_objectid;
 	int ret;
 	bool root_log_pinned = false;
 	bool dest_log_pinned = false;
@@ -9595,7 +9577,10 @@ static int btrfs_rename_exchange(struct inode *old_dir,
 
 	/* src is a subvolume */
 	if (old_ino == BTRFS_FIRST_FREE_OBJECTID) {
-		ret = btrfs_unlink_subvol(trans, old_dir, old_dentry);
+		root_objectid = BTRFS_I(old_inode)->root->root_key.objectid;
+		ret = btrfs_unlink_subvol(trans, old_dir, root_objectid,
+					  old_dentry->d_name.name,
+					  old_dentry->d_name.len);
 	} else { /* src is an inode */
 		ret = __btrfs_unlink_inode(trans, root, BTRFS_I(old_dir),
 					   BTRFS_I(old_dentry->d_inode),
@@ -9611,7 +9596,10 @@ static int btrfs_rename_exchange(struct inode *old_dir,
 
 	/* dest is a subvolume */
 	if (new_ino == BTRFS_FIRST_FREE_OBJECTID) {
-		ret = btrfs_unlink_subvol(trans, new_dir, new_dentry);
+		root_objectid = BTRFS_I(new_inode)->root->root_key.objectid;
+		ret = btrfs_unlink_subvol(trans, new_dir, root_objectid,
+					  new_dentry->d_name.name,
+					  new_dentry->d_name.len);
 	} else { /* dest is an inode */
 		ret = __btrfs_unlink_inode(trans, dest, BTRFS_I(new_dir),
 					   BTRFS_I(new_dentry->d_inode),
@@ -9809,6 +9797,7 @@ static int btrfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 	struct inode *new_inode = d_inode(new_dentry);
 	struct inode *old_inode = d_inode(old_dentry);
 	u64 index = 0;
+	u64 root_objectid;
 	int ret;
 	u64 old_ino = btrfs_ino(BTRFS_I(old_inode));
 	bool log_pinned = false;
@@ -9916,7 +9905,10 @@ static int btrfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 				BTRFS_I(old_inode), 1);
 
 	if (unlikely(old_ino == BTRFS_FIRST_FREE_OBJECTID)) {
-		ret = btrfs_unlink_subvol(trans, old_dir, old_dentry);
+		root_objectid = BTRFS_I(old_inode)->root->root_key.objectid;
+		ret = btrfs_unlink_subvol(trans, old_dir, root_objectid,
+					old_dentry->d_name.name,
+					old_dentry->d_name.len);
 	} else {
 		ret = __btrfs_unlink_inode(trans, root, BTRFS_I(old_dir),
 					BTRFS_I(d_inode(old_dentry)),
@@ -9935,7 +9927,10 @@ static int btrfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 		new_inode->i_ctime = current_time(new_inode);
 		if (unlikely(btrfs_ino(BTRFS_I(new_inode)) ==
 			     BTRFS_EMPTY_SUBVOL_DIR_OBJECTID)) {
-			ret = btrfs_unlink_subvol(trans, new_dir, new_dentry);
+			root_objectid = BTRFS_I(new_inode)->location.objectid;
+			ret = btrfs_unlink_subvol(trans, new_dir, root_objectid,
+						new_dentry->d_name.name,
+						new_dentry->d_name.len);
 			BUG_ON(new_inode->i_nlink == 0);
 		} else {
 			ret = btrfs_unlink_inode(trans, dest, BTRFS_I(new_dir),
@@ -10348,7 +10343,6 @@ static int __btrfs_prealloc_file_range(struct inode *inode, int mode,
 	struct btrfs_root *root = BTRFS_I(inode)->root;
 	struct btrfs_key ins;
 	u64 cur_offset = start;
-	u64 clear_offset = start;
 	u64 i_size;
 	u64 cur_bytes;
 	u64 last_alloc = (u64)-1;
@@ -10383,15 +10377,6 @@ static int __btrfs_prealloc_file_range(struct inode *inode, int mode,
 				btrfs_end_transaction(trans);
 			break;
 		}
-
-		/*
-		 * We've reserved this space, and thus converted it from
-		 * ->bytes_may_use to ->bytes_reserved.  Any error that happens
-		 * from here on out we will only need to clear our reservation
-		 * for the remaining unreserved area, so advance our
-		 * clear_offset by our extent size.
-		 */
-		clear_offset += ins.offset;
 		btrfs_dec_block_group_reservations(fs_info, ins.objectid);
 
 		last_alloc = ins.offset;
@@ -10472,9 +10457,9 @@ next:
 		if (own_trans)
 			btrfs_end_transaction(trans);
 	}
-	if (clear_offset < end)
-		btrfs_free_reserved_data_space(inode, NULL, clear_offset,
-			end - clear_offset + 1);
+	if (cur_offset < end)
+		btrfs_free_reserved_data_space(inode, NULL, cur_offset,
+			end - cur_offset + 1);
 	return ret;
 }
 

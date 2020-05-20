@@ -1729,8 +1729,6 @@ static int module_add_modinfo_attrs(struct module *mod)
 error_out:
 	if (i > 0)
 		module_remove_modinfo_attrs(mod, --i);
-	else
-		kfree(mod->modinfo_attrs);
 	return error;
 }
 
@@ -2980,7 +2978,9 @@ static int setup_load_info(struct load_info *info, int flags)
 
 	/* Try to find a name early so we can log errors with a module name */
 	info->index.info = find_sec(info, ".modinfo");
-	if (info->index.info)
+	if (!info->index.info)
+		info->name = "(missing .modinfo section)";
+	else
 		info->name = get_modinfo(info, "name");
 
 	/* Find internal symbols and strings. */
@@ -2995,15 +2995,14 @@ static int setup_load_info(struct load_info *info, int flags)
 	}
 
 	if (info->index.sym == 0) {
-		pr_warn("%s: module has no symbols (stripped?)\n",
-			info->name ?: "(missing .modinfo section or name field)");
+		pr_warn("%s: module has no symbols (stripped?)\n", info->name);
 		return -ENOEXEC;
 	}
 
 	info->index.mod = find_sec(info, ".gnu.linkonce.this_module");
 	if (!info->index.mod) {
 		pr_warn("%s: No module found in object\n",
-			info->name ?: "(missing .modinfo section or name field)");
+			info->name ?: "(missing .modinfo name field)");
 		return -ENOEXEC;
 	}
 	/* This is temporary: point mod into copy of data. */

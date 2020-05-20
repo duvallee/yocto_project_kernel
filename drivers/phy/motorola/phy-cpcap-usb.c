@@ -115,7 +115,7 @@ struct cpcap_usb_ints_state {
 enum cpcap_gpio_mode {
 	CPCAP_DM_DP,
 	CPCAP_MDM_RX_TX,
-	CPCAP_UNKNOWN_DISABLED,	/* Seems to disable USB lines */
+	CPCAP_UNKNOWN,
 	CPCAP_OTG_DM_DP,
 };
 
@@ -379,8 +379,7 @@ static int cpcap_usb_set_uart_mode(struct cpcap_phy_ddata *ddata)
 {
 	int error;
 
-	/* Disable lines to prevent glitches from waking up mdm6600 */
-	error = cpcap_usb_gpio_set_mode(ddata, CPCAP_UNKNOWN_DISABLED);
+	error = cpcap_usb_gpio_set_mode(ddata, CPCAP_DM_DP);
 	if (error)
 		goto out_err;
 
@@ -407,11 +406,6 @@ static int cpcap_usb_set_uart_mode(struct cpcap_phy_ddata *ddata)
 	if (error)
 		goto out_err;
 
-	/* Enable UART mode */
-	error = cpcap_usb_gpio_set_mode(ddata, CPCAP_DM_DP);
-	if (error)
-		goto out_err;
-
 	return 0;
 
 out_err:
@@ -424,8 +418,7 @@ static int cpcap_usb_set_usb_mode(struct cpcap_phy_ddata *ddata)
 {
 	int error;
 
-	/* Disable lines to prevent glitches from waking up mdm6600 */
-	error = cpcap_usb_gpio_set_mode(ddata, CPCAP_UNKNOWN_DISABLED);
+	error = cpcap_usb_gpio_set_mode(ddata, CPCAP_OTG_DM_DP);
 	if (error)
 		return error;
 
@@ -462,11 +455,6 @@ static int cpcap_usb_set_usb_mode(struct cpcap_phy_ddata *ddata)
 	error = regmap_update_bits(ddata->reg, CPCAP_REG_USBC2,
 				   CPCAP_BIT_USBXCVREN,
 				   CPCAP_BIT_USBXCVREN);
-	if (error)
-		goto out_err;
-
-	/* Enable USB mode */
-	error = cpcap_usb_gpio_set_mode(ddata, CPCAP_OTG_DM_DP);
 	if (error)
 		goto out_err;
 

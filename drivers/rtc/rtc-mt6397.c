@@ -362,7 +362,7 @@ static int mtk_rtc_probe(struct platform_device *pdev)
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to request alarm IRQ: %d: %d\n",
 			rtc->irq, ret);
-		return ret;
+		goto out_dispose_irq;
 	}
 
 	device_init_wakeup(&pdev->dev, 1);
@@ -378,7 +378,9 @@ static int mtk_rtc_probe(struct platform_device *pdev)
 	return 0;
 
 out_free_irq:
-	free_irq(rtc->irq, rtc);
+	free_irq(rtc->irq, rtc->rtc_dev);
+out_dispose_irq:
+	irq_dispose_mapping(rtc->irq);
 	return ret;
 }
 
@@ -386,7 +388,8 @@ static int mtk_rtc_remove(struct platform_device *pdev)
 {
 	struct mt6397_rtc *rtc = platform_get_drvdata(pdev);
 
-	free_irq(rtc->irq, rtc);
+	free_irq(rtc->irq, rtc->rtc_dev);
+	irq_dispose_mapping(rtc->irq);
 
 	return 0;
 }

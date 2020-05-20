@@ -2153,8 +2153,6 @@ skip_ats_check:
 	 */
 	domain_flush_tlb_pde(domain);
 
-	domain_flush_complete(domain);
-
 	return ret;
 }
 
@@ -3709,20 +3707,7 @@ static void set_remap_table_entry(struct amd_iommu *iommu, u16 devid,
 	iommu_flush_dte(iommu, devid);
 }
 
-static int set_remap_table_entry_alias(struct pci_dev *pdev, u16 alias,
-				       void *data)
-{
-	struct irq_remap_table *table = data;
-
-	irq_lookup_table[alias] = table;
-	set_dte_irq_entry(alias, table);
-
-	iommu_flush_dte(amd_iommu_rlookup_table[alias], alias);
-
-	return 0;
-}
-
-static struct irq_remap_table *alloc_irq_table(u16 devid, struct pci_dev *pdev)
+static struct irq_remap_table *alloc_irq_table(u16 devid)
 {
 	struct irq_remap_table *table = NULL;
 	struct irq_remap_table *new_table = NULL;
@@ -3768,12 +3753,7 @@ static struct irq_remap_table *alloc_irq_table(u16 devid, struct pci_dev *pdev)
 	table = new_table;
 	new_table = NULL;
 
-	if (pdev)
-		pci_for_each_dma_alias(pdev, set_remap_table_entry_alias,
-				       table);
-	else
-		set_remap_table_entry(iommu, devid, table);
-
+	set_remap_table_entry(iommu, devid, table);
 	if (devid != alias)
 		set_remap_table_entry(iommu, alias, table);
 
@@ -3790,8 +3770,7 @@ out_unlock:
 	return table;
 }
 
-static int alloc_irq_index(u16 devid, int count, bool align,
-			   struct pci_dev *pdev)
+static int alloc_irq_index(u16 devid, int count, bool align)
 {
 	struct irq_remap_table *table;
 	int index, c, alignment = 1;
@@ -3801,7 +3780,7 @@ static int alloc_irq_index(u16 devid, int count, bool align,
 	if (!iommu)
 		return -ENODEV;
 
-	table = alloc_irq_table(devid, pdev);
+	table = alloc_irq_table(devid);
 	if (!table)
 		return -ENODEV;
 
@@ -4234,7 +4213,7 @@ static int irq_remapping_alloc(struct irq_domain *domain, unsigned int virq,
 		struct irq_remap_table *table;
 		struct amd_iommu *iommu;
 
-		table = alloc_irq_table(devid, NULL);
+		table = alloc_irq_table(devid);
 		if (table) {
 			if (!table->min_index) {
 				/*
@@ -4251,15 +4230,11 @@ static int irq_remapping_alloc(struct irq_domain *domain, unsigned int virq,
 		} else {
 			index = -ENOMEM;
 		}
-	} else if (info->type == X86_IRQ_ALLOC_TYPE_MSI ||
-		   info->type == X86_IRQ_ALLOC_TYPE_MSIX) {
+	} else {
 		bool align = (info->type == X86_IRQ_ALLOC_TYPE_MSI);
 
-		index = alloc_irq_index(devid, nr_irqs, align, info->msi_dev);
-	} else {
-		index = alloc_irq_index(devid, nr_irqs, false, NULL);
+		index = alloc_irq_index(devid, nr_irqs, align);
 	}
-
 	if (index < 0) {
 		pr_warn("Failed to allocate IRTE\n");
 		ret = index;
