@@ -1,11 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  linux/arch/arm/mm/proc-v7.S
  *
  *  Copyright (C) 2001 Deep Blue Solutions Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  *  This is the "shell" of the ARMv7 processor support.
  */
@@ -290,6 +287,8 @@ __v7_ca17mp_setup:
 	mov	r10, #0
 1:	adr	r0, __v7_setup_stack_ptr
 	ldr	r12, [r0]
+	tst	r12, #0x1f
+	addeq	r12, r12, #4
 	add	r12, r12, r0			@ the local stack
 	stmia	r12, {r1-r6, lr}		@ v7_invalidate_l1 touches r0-r6
 	bl      v7_invalidate_l1
@@ -392,6 +391,11 @@ __ca12_errata:
 	orr	r10, r10, #1 << 24		@ set bit #24
 	mcr	p15, 0, r10, c15, c0, 1		@ write diagnostic register
 #endif
+#ifdef CONFIG_ARM_ERRATA_857271
+	mrc	p15, 0, r10, c15, c0, 1		@ read diagnostic register
+	orr	r10, r10, #3 << 10		@ set bits #10 and #11
+	mcr	p15, 0, r10, c15, c0, 1		@ write diagnostic register
+#endif
 	b	__errata_finish
 
 __ca17_errata:
@@ -406,6 +410,11 @@ __ca17_errata:
 	mrcle	p15, 0, r10, c15, c0, 1		@ read diagnostic register
 	orrle	r10, r10, #1 << 12		@ set bit #12
 	mcrle	p15, 0, r10, c15, c0, 1		@ write diagnostic register
+#endif
+#ifdef CONFIG_ARM_ERRATA_857272
+	mrc	p15, 0, r10, c15, c0, 1		@ read diagnostic register
+	orr	r10, r10, #3 << 10		@ set bits #10 and #11
+	mcr	p15, 0, r10, c15, c0, 1		@ write diagnostic register
 #endif
 	b	__errata_finish
 
@@ -467,6 +476,8 @@ __v7_setup:
 	adr	r0, __v7_setup_stack_ptr
 	ldr	r12, [r0]
 	add	r12, r12, r0			@ the local stack
+	tst	r12, #0x1f
+	addeq	r12, r12, #4
 	stmia	r12, {r1-r6, lr}		@ v7_invalidate_l1 touches r0-r6
 	bl      v7_invalidate_l1
 	ldmia	r12, {r1-r6, lr}
@@ -550,7 +561,7 @@ ENDPROC(__v7_setup)
 	.bss
 	.align	2
 __v7_setup_stack:
-	.space	4 * 7				@ 7 registers
+	.space	4 * 8				@ 7 registers + 1 spare
 
 	__INITDATA
 

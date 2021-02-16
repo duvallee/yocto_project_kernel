@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Defines interfaces for interacting wtih the Raspberry Pi firmware's
  * property channel.
  *
  * Copyright © 2015 Broadcom
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/dma-mapping.h>
@@ -14,8 +11,8 @@
 #include <linux/module.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
-#include <linux/reboot.h>
 #include <linux/slab.h>
+#include <linux/reboot.h>
 #include <soc/bcm2835/raspberrypi-firmware.h>
 
 #define MBOX_MSG(chan, data28)		(((data28) & ~0xf) | ((chan) & 0xf))
@@ -24,7 +21,6 @@
 #define MBOX_CHAN_PROPERTY		8
 
 static struct platform_device *rpi_hwmon;
-static struct platform_device *rpi_clk;
 
 struct rpi_firmware {
 	struct mbox_client cl;
@@ -60,8 +56,12 @@ rpi_firmware_transaction(struct rpi_firmware *fw, u32 chan, u32 data)
 	reinit_completion(&fw->c);
 	ret = mbox_send_message(fw->chan, &message);
 	if (ret >= 0) {
-		wait_for_completion(&fw->c);
-		ret = 0;
+		if (wait_for_completion_timeout(&fw->c, HZ)) {
+			ret = 0;
+		} else {
+			ret = -ETIMEDOUT;
+			WARN_ONCE(1, "Firmware transaction timeout");
+		}
 	} else {
 		dev_err(fw->cl.dev, "mbox_send_message returned %d\n", ret);
 	}
@@ -149,8 +149,8 @@ EXPORT_SYMBOL_GPL(rpi_firmware_property_list);
 int rpi_firmware_property(struct rpi_firmware *fw,
 			  u32 tag, void *tag_data, size_t buf_size)
 {
-	int ret;
 	struct rpi_firmware_property_tag_header *header;
+	int ret;
 
 	/* Some mailboxes can use over 1k bytes. Rather than checking
 	 * size and using stack or kmalloc depending on requirements,
@@ -172,13 +172,13 @@ int rpi_firmware_property(struct rpi_firmware *fw,
 
 	memcpy(tag_data, data + sizeof(*header), buf_size);
 
+	kfree(data);
+
 	if ((tag == RPI_FIRMWARE_GET_THROTTLED) &&
 	     memcmp(&fw->get_throttled, tag_data, sizeof(fw->get_throttled))) {
 		memcpy(&fw->get_throttled, tag_data, sizeof(fw->get_throttled));
 		sysfs_notify(&fw->cl.dev->kobj, NULL, "get_throttled");
 	}
-
-	kfree(data);
 
 	return ret;
 }
@@ -298,12 +298,6 @@ rpi_register_hwmon_driver(struct device *dev, struct rpi_firmware *fw)
 	}
 }
 
-static void rpi_register_clk_driver(struct device *dev)
-{
-	rpi_clk = platform_device_register_data(dev, "raspberrypi-clk",
-						-1, NULL, 0);
-}
-
 static int rpi_firmware_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -333,9 +327,18 @@ static int rpi_firmware_probe(struct platform_device *pdev)
 	rpi_firmware_print_firmware_revision(fw);
 	rpi_firmware_print_firmware_hash(fw);
 	rpi_register_hwmon_driver(dev, fw);
-	rpi_register_clk_driver(dev);
 
 	return 0;
+}
+
+static void rpi_firmware_shutdown(struct platform_device *pdev)
+{
+	struct rpi_firmware *fw = platform_get_drvdata(pdev);
+
+	if (!fw)
+		return;
+
+	rpi_firmware_property(fw, RPI_FIRMWARE_NOTIFY_REBOOT, NULL, 0);
 }
 
 static int rpi_firmware_remove(struct platform_device *pdev)
@@ -344,8 +347,6 @@ static int rpi_firmware_remove(struct platform_device *pdev)
 
 	platform_device_unregister(rpi_hwmon);
 	rpi_hwmon = NULL;
-	platform_device_unregister(rpi_clk);
-	rpi_clk = NULL;
 	mbox_free_channel(fw->chan);
 	g_pdev = NULL;
 
@@ -381,6 +382,7 @@ static struct platform_driver rpi_firmware_driver = {
 		.of_match_table = rpi_firmware_of_match,
 	},
 	.probe		= rpi_firmware_probe,
+	.shutdown	= rpi_firmware_shutdown,
 	.remove		= rpi_firmware_remove,
 };
 

@@ -27,7 +27,7 @@
  */
 struct fbtft_gpio {
 	char name[FBTFT_GPIO_NAME_SIZE];
-	unsigned int gpio;
+	struct gpio_desc *gpio;
 };
 
 struct fbtft_par;
@@ -134,7 +134,6 @@ struct fbtft_display {
  */
 struct fbtft_platform_data {
 	struct fbtft_display display;
-	const struct fbtft_gpio *gpios;
 	unsigned int rotate;
 	bool bgr;
 	unsigned int fps;
@@ -207,15 +206,15 @@ struct fbtft_par {
 	unsigned int dirty_lines_start;
 	unsigned int dirty_lines_end;
 	struct {
-		int reset;
-		int dc;
-		int rd;
-		int wr;
-		int latch;
-		int cs;
-		int db[16];
-		int led[16];
-		int aux[16];
+		struct gpio_desc *reset;
+		struct gpio_desc *dc;
+		struct gpio_desc *rd;
+		struct gpio_desc *wr;
+		struct gpio_desc *latch;
+		struct gpio_desc *cs;
+		struct gpio_desc *db[16];
+		struct gpio_desc *led[16];
+		struct gpio_desc *aux[16];
 	} gpio;
 	const s16 *init_sequence;
 	struct {
@@ -232,13 +231,14 @@ struct fbtft_par {
 	bool polarity;
 };
 
-#define NUMARGS(...)  (sizeof((int[]){__VA_ARGS__})/sizeof(int))
+#define NUMARGS(...)  (sizeof((int[]){__VA_ARGS__}) / sizeof(int))
 
 #define write_reg(par, ...)                                            \
 	((par)->fbtftops.write_register(par, NUMARGS(__VA_ARGS__), __VA_ARGS__))
 
 /* fbtft-core.c */
 int fbtft_write_buf_dc(struct fbtft_par *par, void *buf, size_t len, int dc);
+__printf(5, 6)
 void fbtft_dbg_hex(const struct device *dev, int groupsize,
 		   void *buf, size_t len, const char *fmt, ...);
 struct fb_info *fbtft_framebuffer_alloc(struct fbtft_display *display,
@@ -251,7 +251,8 @@ void fbtft_register_backlight(struct fbtft_par *par);
 void fbtft_unregister_backlight(struct fbtft_par *par);
 int fbtft_init_display(struct fbtft_par *par);
 int fbtft_probe_common(struct fbtft_display *display, struct spi_device *sdev,
-		       struct platform_device *pdev);
+		       struct platform_device *pdev,
+		       const struct of_device_id *dt_ids);
 int fbtft_remove_common(struct device *dev, struct fb_info *info);
 
 /* fbtft-io.c */
@@ -272,11 +273,13 @@ void fbtft_write_reg8_bus9(struct fbtft_par *par, int len, ...);
 void fbtft_write_reg16_bus8(struct fbtft_par *par, int len, ...);
 void fbtft_write_reg16_bus16(struct fbtft_par *par, int len, ...);
 
-#define FBTFT_REGISTER_DRIVER(_name, _compatible, _display)                \
+#define FBTFT_REGISTER_DRIVER_START(_display)                              \
+									   \
+static const struct of_device_id dt_ids[];                                 \
 									   \
 static int fbtft_driver_probe_spi(struct spi_device *spi)                  \
 {                                                                          \
-	return fbtft_probe_common(_display, spi, NULL);                    \
+	return fbtft_probe_common(_display, spi, NULL, dt_ids);	           \
 }                                                                          \
 									   \
 static int fbtft_driver_remove_spi(struct spi_device *spi)                 \
@@ -288,7 +291,7 @@ static int fbtft_driver_remove_spi(struct spi_device *spi)                 \
 									   \
 static int fbtft_driver_probe_pdev(struct platform_device *pdev)           \
 {                                                                          \
-	return fbtft_probe_common(_display, NULL, pdev);                   \
+	return fbtft_probe_common(_display, NULL, pdev, dt_ids);           \
 }                                                                          \
 									   \
 static int fbtft_driver_remove_pdev(struct platform_device *pdev)          \
@@ -298,8 +301,16 @@ static int fbtft_driver_remove_pdev(struct platform_device *pdev)          \
 	return fbtft_remove_common(&pdev->dev, info);                      \
 }                                                                          \
 									   \
-static const struct of_device_id dt_ids[] = {                              \
-	{ .compatible = _compatible },                                     \
+static const struct of_device_id dt_ids[] = {
+
+#define FBTFT_COMPATIBLE(_compatible)                                      \
+	{ .compatible = _compatible },
+
+#define FBTFT_VARIANT_COMPATIBLE(_compatible, _variant)                    \
+	{ .compatible = _compatible, .data = _variant },
+
+#define FBTFT_REGISTER_DRIVER_END(_name, _display)                         \
+									   \
 	{},                                                                \
 };                                                                         \
 									   \
@@ -344,6 +355,11 @@ static void __exit fbtft_driver_module_exit(void)                          \
 module_init(fbtft_driver_module_init);                                     \
 module_exit(fbtft_driver_module_exit);
 
+#define FBTFT_REGISTER_DRIVER(_name, _compatible, _display)                \
+	FBTFT_REGISTER_DRIVER_START(_display)                              \
+	FBTFT_COMPATIBLE(_compatible)                                      \
+	FBTFT_REGISTER_DRIVER_END(_name, _display)
+
 /* Debug macros */
 
 /* shorthand debug levels */
@@ -355,39 +371,39 @@ module_exit(fbtft_driver_module_exit);
 #define DEBUG_LEVEL_6	(DEBUG_LEVEL_4 | DEBUG_LEVEL_5)
 #define DEBUG_LEVEL_7	0xFFFFFFFF
 
-#define DEBUG_DRIVER_INIT_FUNCTIONS (1<<3)
-#define DEBUG_TIME_FIRST_UPDATE     (1<<4)
-#define DEBUG_TIME_EACH_UPDATE      (1<<5)
-#define DEBUG_DEFERRED_IO           (1<<6)
-#define DEBUG_FBTFT_INIT_FUNCTIONS  (1<<7)
+#define DEBUG_DRIVER_INIT_FUNCTIONS BIT(3)
+#define DEBUG_TIME_FIRST_UPDATE     BIT(4)
+#define DEBUG_TIME_EACH_UPDATE      BIT(5)
+#define DEBUG_DEFERRED_IO           BIT(6)
+#define DEBUG_FBTFT_INIT_FUNCTIONS  BIT(7)
 
 /* fbops */
-#define DEBUG_FB_READ               (1<<8)
-#define DEBUG_FB_WRITE              (1<<9)
-#define DEBUG_FB_FILLRECT           (1<<10)
-#define DEBUG_FB_COPYAREA           (1<<11)
-#define DEBUG_FB_IMAGEBLIT          (1<<12)
-#define DEBUG_FB_SETCOLREG          (1<<13)
-#define DEBUG_FB_BLANK              (1<<14)
+#define DEBUG_FB_READ               BIT(8)
+#define DEBUG_FB_WRITE              BIT(9)
+#define DEBUG_FB_FILLRECT           BIT(10)
+#define DEBUG_FB_COPYAREA           BIT(11)
+#define DEBUG_FB_IMAGEBLIT          BIT(12)
+#define DEBUG_FB_SETCOLREG          BIT(13)
+#define DEBUG_FB_BLANK              BIT(14)
 
-#define DEBUG_SYSFS                 (1<<16)
+#define DEBUG_SYSFS                 BIT(16)
 
 /* fbtftops */
-#define DEBUG_BACKLIGHT             (1<<17)
-#define DEBUG_READ                  (1<<18)
-#define DEBUG_WRITE                 (1<<19)
-#define DEBUG_WRITE_VMEM            (1<<20)
-#define DEBUG_WRITE_REGISTER        (1<<21)
-#define DEBUG_SET_ADDR_WIN          (1<<22)
-#define DEBUG_RESET                 (1<<23)
-#define DEBUG_MKDIRTY               (1<<24)
-#define DEBUG_UPDATE_DISPLAY        (1<<25)
-#define DEBUG_INIT_DISPLAY          (1<<26)
-#define DEBUG_BLANK                 (1<<27)
-#define DEBUG_REQUEST_GPIOS         (1<<28)
-#define DEBUG_FREE_GPIOS            (1<<29)
-#define DEBUG_REQUEST_GPIOS_MATCH   (1<<30)
-#define DEBUG_VERIFY_GPIOS          (1<<31)
+#define DEBUG_BACKLIGHT             BIT(17)
+#define DEBUG_READ                  BIT(18)
+#define DEBUG_WRITE                 BIT(19)
+#define DEBUG_WRITE_VMEM            BIT(20)
+#define DEBUG_WRITE_REGISTER        BIT(21)
+#define DEBUG_SET_ADDR_WIN          BIT(22)
+#define DEBUG_RESET                 BIT(23)
+#define DEBUG_MKDIRTY               BIT(24)
+#define DEBUG_UPDATE_DISPLAY        BIT(25)
+#define DEBUG_INIT_DISPLAY          BIT(26)
+#define DEBUG_BLANK                 BIT(27)
+#define DEBUG_REQUEST_GPIOS         BIT(28)
+#define DEBUG_FREE_GPIOS            BIT(29)
+#define DEBUG_REQUEST_GPIOS_MATCH   BIT(30)
+#define DEBUG_VERIFY_GPIOS          BIT(31)
 
 #define fbtft_init_dbg(dev, format, arg...)                  \
 do {                                                         \

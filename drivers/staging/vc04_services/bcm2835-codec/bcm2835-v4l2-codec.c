@@ -89,6 +89,9 @@ static const char * const components[] = {
 	"ril.isp",
 };
 
+/* Timeout for stop_streaming to allow all buffers to return */
+#define COMPLETE_TIMEOUT (2 * HZ)
+
 #define MIN_W		32
 #define MIN_H		32
 #define MAX_W		1920
@@ -204,7 +207,7 @@ static const struct bcm2835_codec_fmt supported_formats[] = {
 		.mmal_fmt		= MMAL_ENCODING_BGR24,
 		.size_multiplier_x2	= 2,
 	}, {
-		.fourcc			= V4L2_PIX_FMT_BGR32,
+		.fourcc			= V4L2_PIX_FMT_BGRX32,
 		.depth			= 32,
 		.bytesperline_align	= 32,
 		.flags			= 0,
@@ -311,6 +314,40 @@ static const struct bcm2835_codec_fmt supported_formats[] = {
 		.size_multiplier_x2	= 2,
 		.is_bayer		= true,
 	}, {
+		/* 14 bit */
+		.fourcc			= V4L2_PIX_FMT_SRGGB14P,
+		.depth			= 14,
+		.bytesperline_align	= 32,
+		.flags			= 0,
+		.mmal_fmt		= MMAL_ENCODING_BAYER_SRGGB14P,
+		.size_multiplier_x2	= 2,
+		.is_bayer		= true,
+	}, {
+		.fourcc			= V4L2_PIX_FMT_SBGGR14P,
+		.depth			= 14,
+		.bytesperline_align	= 32,
+		.flags			= 0,
+		.mmal_fmt		= MMAL_ENCODING_BAYER_SBGGR14P,
+		.size_multiplier_x2	= 2,
+		.is_bayer		= true,
+
+	}, {
+		.fourcc			= V4L2_PIX_FMT_SGRBG14P,
+		.depth			= 14,
+		.bytesperline_align	= 32,
+		.flags			= 0,
+		.mmal_fmt		= MMAL_ENCODING_BAYER_SGRBG14P,
+		.size_multiplier_x2	= 2,
+		.is_bayer		= true,
+	}, {
+		.fourcc			= V4L2_PIX_FMT_SGBRG14P,
+		.depth			= 14,
+		.bytesperline_align	= 32,
+		.flags			= 0,
+		.mmal_fmt		= MMAL_ENCODING_BAYER_SGBRG14P,
+		.size_multiplier_x2	= 2,
+		.is_bayer		= true,
+	}, {
 		/* 16 bit */
 		.fourcc			= V4L2_PIX_FMT_SRGGB16,
 		.depth			= 16,
@@ -343,6 +380,47 @@ static const struct bcm2835_codec_fmt supported_formats[] = {
 		.mmal_fmt		= MMAL_ENCODING_BAYER_SGBRG16,
 		.size_multiplier_x2	= 2,
 		.is_bayer		= true,
+	}, {
+		/* Monochrome MIPI formats */
+		/* 8 bit */
+		.fourcc			= V4L2_PIX_FMT_GREY,
+		.depth			= 8,
+		.bytesperline_align	= 32,
+		.flags			= 0,
+		.mmal_fmt		= MMAL_ENCODING_GREY,
+		.size_multiplier_x2	= 2,
+	}, {
+		/* 10 bit */
+		.fourcc			= V4L2_PIX_FMT_Y10P,
+		.depth			= 10,
+		.bytesperline_align	= 32,
+		.flags			= 0,
+		.mmal_fmt		= MMAL_ENCODING_Y10P,
+		.size_multiplier_x2	= 2,
+	}, {
+		/* 12 bit */
+		.fourcc			= V4L2_PIX_FMT_Y12P,
+		.depth			= 12,
+		.bytesperline_align	= 32,
+		.flags			= 0,
+		.mmal_fmt		= MMAL_ENCODING_Y12P,
+		.size_multiplier_x2	= 2,
+	}, {
+		/* 14 bit */
+		.fourcc			= V4L2_PIX_FMT_Y14P,
+		.depth			= 14,
+		.bytesperline_align	= 32,
+		.flags			= 0,
+		.mmal_fmt		= MMAL_ENCODING_Y14P,
+		.size_multiplier_x2	= 2,
+	}, {
+		/* 16 bit */
+		.fourcc			= V4L2_PIX_FMT_Y16,
+		.depth			= 16,
+		.bytesperline_align	= 32,
+		.flags			= 0,
+		.mmal_fmt		= MMAL_ENCODING_Y16,
+		.size_multiplier_x2	= 2,
 	}, {
 		/* Compressed formats */
 		.fourcc			= V4L2_PIX_FMT_H264,
@@ -1838,12 +1916,12 @@ static int vidioc_enum_framesizes(struct file *file, void *fh,
 static const struct v4l2_ioctl_ops bcm2835_codec_ioctl_ops = {
 	.vidioc_querycap	= vidioc_querycap,
 
-	.vidioc_enum_fmt_vid_cap_mplane = vidioc_enum_fmt_vid_cap,
+	.vidioc_enum_fmt_vid_cap = vidioc_enum_fmt_vid_cap,
 	.vidioc_g_fmt_vid_cap_mplane	= vidioc_g_fmt_vid_cap,
 	.vidioc_try_fmt_vid_cap_mplane	= vidioc_try_fmt_vid_cap,
 	.vidioc_s_fmt_vid_cap_mplane	= vidioc_s_fmt_vid_cap,
 
-	.vidioc_enum_fmt_vid_out_mplane = vidioc_enum_fmt_vid_out,
+	.vidioc_enum_fmt_vid_out = vidioc_enum_fmt_vid_out,
 	.vidioc_g_fmt_vid_out_mplane	= vidioc_g_fmt_vid_out,
 	.vidioc_try_fmt_vid_out_mplane	= vidioc_try_fmt_vid_out,
 	.vidioc_s_fmt_vid_out_mplane	= vidioc_s_fmt_vid_out,
@@ -1967,6 +2045,19 @@ static int bcm2835_codec_create_component(struct bcm2835_codec_ctx *ctx)
 					MMAL_PARAMETER_VIDEO_ENCODE_SPS_TIMING,
 					&param, sizeof(param));
 
+		/* Enable inserting headers into the first frame */
+		vchiq_mmal_port_parameter_set(ctx->dev->instance,
+					      &ctx->component->control,
+					      MMAL_PARAMETER_VIDEO_ENCODE_HEADERS_WITH_FRAME,
+					      &param, sizeof(param));
+		/*
+		 * Avoid fragmenting the buffers over multiple frames (unless
+		 * the frame is bigger than the whole buffer)
+		 */
+		vchiq_mmal_port_parameter_set(ctx->dev->instance,
+					      &ctx->component->control,
+					      MMAL_PARAMETER_MINIMISE_FRAGMENTATION,
+					      &param, sizeof(param));
 	} else {
 		if (ctx->q_data[V4L2_M2M_DST].sizeimage <
 			ctx->component->output[0].minimum_buffer.size)
@@ -2180,6 +2271,7 @@ static int bcm2835_codec_start_streaming(struct vb2_queue *q,
 	struct bcm2835_codec_ctx *ctx = vb2_get_drv_priv(q);
 	struct bcm2835_codec_dev *dev = ctx->dev;
 	struct bcm2835_codec_q_data *q_data = get_q_data(ctx, q->type);
+	struct vchiq_mmal_port *port = get_port_data(ctx, q->type);
 	int ret;
 
 	v4l2_dbg(1, debug, &ctx->dev->v4l2_dev, "%s: type: %d count %d\n",
@@ -2195,6 +2287,20 @@ static int bcm2835_codec_start_streaming(struct vb2_queue *q,
 		ctx->component_enabled = true;
 	}
 
+	if (count < port->minimum_buffer.num)
+		count = port->minimum_buffer.num;
+
+	if (port->current_buffer.num < count + 1) {
+		v4l2_dbg(2, debug, &ctx->dev->v4l2_dev, "%s: ctx:%p, buffer count changed %u to %u\n",
+			 __func__, ctx, port->current_buffer.num, count + 1);
+
+		port->current_buffer.num = count + 1;
+		ret = vchiq_mmal_port_set_format(dev->instance, port);
+		if (ret)
+			v4l2_err(&ctx->dev->v4l2_dev, "%s: Error updating buffer count, ret %d\n",
+				 __func__, ret);
+	}
+
 	if (q->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
 		/*
 		 * Create the EOS buffer.
@@ -2206,17 +2312,17 @@ static int bcm2835_codec_start_streaming(struct vb2_queue *q,
 				      &q_data->eos_buffer.mmal);
 		q_data->eos_buffer_in_use = false;
 
-		ctx->component->input[0].cb_ctx = ctx;
+		port->cb_ctx = ctx;
 		ret = vchiq_mmal_port_enable(dev->instance,
-					     &ctx->component->input[0],
+					     port,
 					     ip_buffer_cb);
 		if (ret)
 			v4l2_err(&ctx->dev->v4l2_dev, "%s: Failed enabling i/p port, ret %d\n",
 				 __func__, ret);
 	} else {
-		ctx->component->output[0].cb_ctx = ctx;
+		port->cb_ctx = ctx;
 		ret = vchiq_mmal_port_enable(dev->instance,
-					     &ctx->component->output[0],
+					     port,
 					     op_buffer_cb);
 		if (ret)
 			v4l2_err(&ctx->dev->v4l2_dev, "%s: Failed enabling o/p port, ret %d\n",
@@ -2232,10 +2338,7 @@ static void bcm2835_codec_stop_streaming(struct vb2_queue *q)
 	struct bcm2835_codec_q_data *q_data = get_q_data(ctx, q->type);
 	struct vchiq_mmal_port *port = get_port_data(ctx, q->type);
 	struct vb2_v4l2_buffer *vbuf;
-	struct vb2_v4l2_buffer *vb2;
-	struct v4l2_m2m_buffer *m2m;
-	struct m2m_mmal_buffer *buf;
-	int ret, i;
+	int ret;
 
 	v4l2_dbg(1, debug, &ctx->dev->v4l2_dev, "%s: type: %d - return buffers\n",
 		 __func__, q->type);
@@ -2266,7 +2369,8 @@ static void bcm2835_codec_stop_streaming(struct vb2_queue *q)
 	while (atomic_read(&port->buffers_with_vpu)) {
 		v4l2_dbg(1, debug, &ctx->dev->v4l2_dev, "%s: Waiting for buffers to be returned - %d outstanding\n",
 			 __func__, atomic_read(&port->buffers_with_vpu));
-		ret = wait_for_completion_timeout(&ctx->frame_cmplt, HZ);
+		ret = wait_for_completion_timeout(&ctx->frame_cmplt,
+						  COMPLETE_TIMEOUT);
 		if (ret <= 0) {
 			v4l2_err(&ctx->dev->v4l2_dev, "%s: Timeout waiting for buffers to be returned - %d outstanding\n",
 				 __func__,
@@ -2275,27 +2379,17 @@ static void bcm2835_codec_stop_streaming(struct vb2_queue *q)
 		}
 	}
 
-	/*
-	 * Release the VCSM handle here as otherwise REQBUFS(0) aborts because
-	 * someone is using the dmabuf before giving the driver a chance to do
-	 * anything about it.
-	 */
-	for (i = 0; i < q->num_buffers; i++) {
-		vb2 = to_vb2_v4l2_buffer(q->bufs[i]);
-		m2m = container_of(vb2, struct v4l2_m2m_buffer, vb);
-		buf = container_of(m2m, struct m2m_mmal_buffer, m2m);
-
-		bcm2835_codec_mmal_buf_cleanup(&buf->mmal);
-	}
 
 	/* If both ports disabled, then disable the component */
-	if (!ctx->component->input[0].enabled &&
+	if (ctx->component_enabled &&
+	    !ctx->component->input[0].enabled &&
 	    !ctx->component->output[0].enabled) {
 		ret = vchiq_mmal_component_disable(dev->instance,
 						   ctx->component);
 		if (ret)
 			v4l2_err(&ctx->dev->v4l2_dev, "%s: Failed enabling component, ret %d\n",
 				 __func__, ret);
+		ctx->component_enabled = false;
 	}
 
 	if (V4L2_TYPE_IS_OUTPUT(q->type))
@@ -2556,10 +2650,10 @@ static const struct v4l2_m2m_ops m2m_ops = {
 
 /* Size of the array to provide to the VPU when asking for the list of supported
  * formats.
- * The ISP component currently advertises 33 input formats, so add a small
+ * The ISP component currently advertises 44 input formats, so add a small
  * overhead on that.
  */
-#define MAX_SUPPORTED_ENCODINGS 40
+#define MAX_SUPPORTED_ENCODINGS 50
 
 /* Populate dev->supported_fmts with the formats supported by those ports. */
 static int bcm2835_codec_get_supported_fmts(struct bcm2835_codec_dev *dev)
@@ -2841,6 +2935,10 @@ static int bcm2835_codec_probe(struct platform_device *pdev)
 	return 0;
 
 out:
+	if (drv->isp) {
+		bcm2835_codec_destroy(drv->isp);
+		drv->isp = NULL;
+	}
 	if (drv->encode) {
 		bcm2835_codec_destroy(drv->encode);
 		drv->encode = NULL;

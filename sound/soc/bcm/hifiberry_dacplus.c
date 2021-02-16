@@ -4,6 +4,7 @@
  * Author:	Daniel Matuschek, Stuart MacLean <stuart@hifiberry.com>
  *		Copyright 2014-2015
  *		based on code by Florian Meier <florian.meier@koalo.de>
+ *		Headphone added by Joerg Schambacher, joerg@i2audio.com
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -24,6 +25,7 @@
 #include <linux/of.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
+#include <linux/i2c.h>
 
 #include <sound/core.h>
 #include <sound/pcm.h>
@@ -177,8 +179,7 @@ static int snd_rpi_hifiberry_dacplus_init(struct snd_soc_pcm_runtime *rtd)
 	else
 		snd_soc_component_update_bits(component, PCM512x_GPIO_CONTROL_1, 0x08, 0x08);
 
-	if (digital_gain_0db_limit)
-	{
+	if (digital_gain_0db_limit) {
 		int ret;
 		struct snd_soc_card *card = rtd->card;
 
@@ -240,12 +241,10 @@ static int snd_rpi_hifiberry_dacplus_hw_params(
 			substream, params);
 	}
 
-	ret = snd_soc_dai_set_tdm_slot(rtd->cpu_dai, 0x03, 0x03,
-		channels, width);
+	ret = snd_soc_dai_set_bclk_ratio(rtd->cpu_dai, channels * width);
 	if (ret)
 		return ret;
-	ret = snd_soc_dai_set_tdm_slot(rtd->codec_dai, 0x03, 0x03,
-		channels, width);
+	ret = snd_soc_dai_set_bclk_ratio(rtd->codec_dai, channels * width);
 	return ret;
 }
 
@@ -277,19 +276,30 @@ static struct snd_soc_ops snd_rpi_hifiberry_dacplus_ops = {
 	.shutdown = snd_rpi_hifiberry_dacplus_shutdown,
 };
 
+SND_SOC_DAILINK_DEFS(rpi_hifiberry_dacplus,
+	DAILINK_COMP_ARRAY(COMP_CPU("bcm2708-i2s.0")),
+	DAILINK_COMP_ARRAY(COMP_CODEC("pcm512x.1-004d", "pcm512x-hifi")),
+	DAILINK_COMP_ARRAY(COMP_PLATFORM("bcm2708-i2s.0")));
+
 static struct snd_soc_dai_link snd_rpi_hifiberry_dacplus_dai[] = {
 {
 	.name		= "HiFiBerry DAC+",
 	.stream_name	= "HiFiBerry DAC+ HiFi",
-	.cpu_dai_name	= "bcm2708-i2s.0",
-	.codec_dai_name	= "pcm512x-hifi",
-	.platform_name	= "bcm2708-i2s.0",
-	.codec_name	= "pcm512x.1-004d",
 	.dai_fmt	= SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
 				SND_SOC_DAIFMT_CBS_CFS,
 	.ops		= &snd_rpi_hifiberry_dacplus_ops,
 	.init		= snd_rpi_hifiberry_dacplus_init,
+	SND_SOC_DAILINK_REG(rpi_hifiberry_dacplus),
 },
+};
+
+/* aux device for optional headphone amp */
+static struct snd_soc_aux_dev hifiberry_dacplus_aux_devs[] = {
+	{
+		.dlc = {
+			.name = "tpa6130a2.1-0060",
+		},
+	},
 };
 
 /* audio machine driver */
@@ -301,9 +311,68 @@ static struct snd_soc_card snd_rpi_hifiberry_dacplus = {
 	.num_links    = ARRAY_SIZE(snd_rpi_hifiberry_dacplus_dai),
 };
 
+static int hb_hp_detect(void)
+{
+	struct i2c_adapter *adap = i2c_get_adapter(1);
+	int ret;
+	struct i2c_client tpa_i2c_client = {
+		.addr = 0x60,
+		.adapter = adap,
+	};
+
+	if (!adap)
+		return -EPROBE_DEFER;	/* I2C module not yet available */
+
+	ret = i2c_smbus_read_byte(&tpa_i2c_client) >= 0;
+	i2c_put_adapter(adap);
+	return ret;
+};
+
+static struct property tpa_enable_prop = {
+	       .name = "status",
+	       .length = 4 + 1, /* length 'okay' + 1 */
+	       .value = "okay",
+	};
+
 static int snd_rpi_hifiberry_dacplus_probe(struct platform_device *pdev)
 {
 	int ret = 0;
+	struct snd_soc_card *card = &snd_rpi_hifiberry_dacplus;
+	int len;
+	struct device_node *tpa_node;
+	struct property *tpa_prop;
+	struct of_changeset ocs;
+
+	/* probe for head phone amp */
+	ret = hb_hp_detect();
+	if (ret < 0)
+		return ret;
+	if (ret) {
+		card->aux_dev = hifiberry_dacplus_aux_devs;
+		card->num_aux_devs =
+				ARRAY_SIZE(hifiberry_dacplus_aux_devs);
+		tpa_node = of_find_compatible_node(NULL, NULL, "ti,tpa6130a2");
+		tpa_prop = of_find_property(tpa_node, "status", &len);
+
+		if (strcmp((char *)tpa_prop->value, "okay")) {
+			/* and activate headphone using change_sets */
+			dev_info(&pdev->dev, "activating headphone amplifier");
+			of_changeset_init(&ocs);
+			ret = of_changeset_update_property(&ocs, tpa_node,
+							&tpa_enable_prop);
+			if (ret) {
+				dev_err(&pdev->dev,
+				"cannot activate headphone amplifier\n");
+				return -ENODEV;
+			}
+			ret = of_changeset_apply(&ocs);
+			if (ret) {
+				dev_err(&pdev->dev,
+				"cannot activate headphone amplifier\n");
+				return -ENODEV;
+			}
+		}
+	}
 
 	snd_rpi_hifiberry_dacplus.dev = &pdev->dev;
 	if (pdev->dev.of_node) {
@@ -315,10 +384,10 @@ static int snd_rpi_hifiberry_dacplus_probe(struct platform_device *pdev)
 			"i2s-controller", 0);
 
 		if (i2s_node) {
-			dai->cpu_dai_name = NULL;
-			dai->cpu_of_node = i2s_node;
-			dai->platform_name = NULL;
-			dai->platform_of_node = i2s_node;
+			dai->cpus->dai_name = NULL;
+			dai->cpus->of_node = i2s_node;
+			dai->platforms->name = NULL;
+			dai->platforms->of_node = i2s_node;
 		}
 
 		digital_gain_0db_limit = !of_property_read_bool(
